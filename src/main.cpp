@@ -76,7 +76,54 @@ boolean wifiConect() {
     Serial.println(WiFi.status());
     Serial.println(F("Setup done"));
     return true;
+}
+void otaInitialize() {
+    ArduinoOTA.setHostname("roommonitorclient.local");
+    ArduinoOTA.onStart([]() { 
+      Serial.println("OTA Start"); 
+      displayMessage("OTA Start");
+    });
+    ArduinoOTA.onEnd([]() { 
+      Serial.println("OTA End"); 
+      displayMessage("OTA End");
+    });
+    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+        Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+    });
+    ArduinoOTA.onError([](ota_error_t error) {
+        Serial.printf("Error[%u]: ", error);
+        if (error == OTA_AUTH_ERROR) {
+            Serial.println("Auth Failed");
+            displayMessage("Auth Failed");
+        } else if (error == OTA_BEGIN_ERROR) {
+            Serial.println("Begin Failed");
+            displayMessage("Begin Failed");
+        } else if (error == OTA_CONNECT_ERROR) {
+            Serial.println("Connect Failed");
+            displayMessage("Connect Failed");
+        } else if (error == OTA_RECEIVE_ERROR) {
+            Serial.println("Receive Failed");
+            displayMessage("Receive Failed");
+        } else if (error == OTA_END_ERROR) {
+            Serial.println("End Failed");
+            displayMessage("End Failed");
+        }
+    });
+    ArduinoOTA.begin();
+}
 
+boolean shouldWaitForOTA() {
+  pinMode(0, INPUT);
+  bool waiforOTA = false;
+  int keeptrying = 6;
+  while (keeptrying-- > 0 && !waiforOTA) {
+      if (digitalRead(0) == LOW) {
+        return true;
+      }
+      Serial.print(".");
+      delay(500);
+  } 
+  return false;
 }
 
 void setup(void)
@@ -96,8 +143,21 @@ void setup(void)
     while(true) {};
   }
 
-  pinMode(0, INPUT);
-
+  //Give some time to the user to press the programming button in order to indicate we will be doing OTA update.
+  displayMessage("OTA?");
+  bool waitforOTA = shouldWaitForOTA();
+  if (waitforOTA) {
+    Serial.println("Waiting for OTA");
+    displayMessage("Waiting for OTA");
+    otaInitialize();
+    while(1) {
+        Serial.print(".");
+        ArduinoOTA.handle();
+        delay(500);
+    }
+  } else {
+    displayMessage("No OTA. ");
+  }
 }
 
 void loop(void)
