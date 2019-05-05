@@ -8,7 +8,7 @@
 #include <U8x8lib.h>
 
 const char aioServer[] = "io.adafruit.com";
-const int aioServerport = 8883; 
+const int aioServerPort = 8883; 
 const char ssid[] = MYSSID; //put #define MYSSID "xyz" in keys.h
 const char password[] = MYPASS; //put #define MYPASS "blf" in keys.h
 const char aioUsername[] = AIO_USERNAME; //put #define AIO_USERNAME "xyz" in keys.h
@@ -29,28 +29,34 @@ IPAddress subnet(255, 255, 255, 0);
 
 U8X8_SSD1306_128X32_UNIVISION_SW_I2C display(5,4);
 
+WiFiClientSecure client;
+Adafruit_MQTT_Client mqtt(&client, aioServer, aioServerPort, aioUsername, aioKey);
+Adafruit_MQTT_Subscribe mqttTempFeed(&mqtt, tempfeed, MQTT_QOS_1);
+
 void displayMessage(const char* s) {
   display.clearDisplay();
   display.setFont(u8x8_font_chroma48medium8_r);
   display.drawString(0, 0, s);
 }
 
-void verifyFingerprint() {
+bool verifyFingerprint() {
   displayMessage("Verifying...");
   Serial.println(aioServer);
-  // if (! client.connect(aioServer, aioServerPort)) {
-    // Serial.println(F("Connection failed."));
-    // while(1);
-  // }
-  // if (client.verify(aioSslFingreprint, aioServer)) {
-  //   Serial.println(F("Connection secure."));
-  // } else {
-  //   Serial.println(F("Connection insecure!"));
-  //   while(1);
-  // }
-
-  // client.stop(); //otherwise the MQTT.connected() will return true, because the implementation
-  // just asks the client if there is a connectioni. It actully doesn't check if there was a mqtt connection established.
+  if (! client.connect(aioServer, aioServerPort)) {
+    Serial.println(F("Connection failed."));
+    displayMessage("CON fail.");
+    return false;
+  }
+  if (client.verify(aioSslFingreprint, aioServer)) {
+    Serial.println(F("Connection secure."));
+    return true;
+  } else {
+    Serial.println(F("Connection insecure!"));
+    displayMessage("CON insecure.");
+    return false;
+  }
+  client.stop(); //otherwise the MQTT.connected() will return true, because the implementation
+  //just asks the client if there is a connectioni. It actully doesn't check if there was a mqtt connection established.
 }
 
 boolean wifiConect() {
@@ -73,6 +79,8 @@ boolean wifiConect() {
         delay(50);
         wifiStatus = WiFi.status();
     }
+    Serial.println("Mac address:"); Serial.println(WiFi.macAddress());
+    Serial.println("IP address: "); Serial.println(WiFi.localIP());
     Serial.println(WiFi.status());
     Serial.println(F("Setup done"));
     return true;
@@ -126,6 +134,33 @@ boolean shouldWaitForOTA() {
   return false;
 }
 
+bool connectMQTT() {
+  if (mqtt.connected()) {
+    return true;
+  }
+  uint8_t retries = 3;
+  int8_t ret;
+  while ((ret = mqtt.connect()) != 0) { // connect will return 0 for connected
+      Serial.println(mqtt.connectErrorString(ret));
+      Serial.println(F("Retr MQTT connection in 0.5 second..."));
+      mqtt.disconnect();
+      delay(500); 
+      retries--;
+      if (retries == 0) {
+          return false; 
+      }
+  }
+
+  if (mqtt.connected()) {
+      Serial.println(F(" MQTT Connected!"));
+      return true;
+  } else {
+      Serial.print(F(" MQTT still NOT onnected! "));
+      Serial.println(ret);
+      return false;
+  }
+}
+
 void setup(void)
 {
   Serial.begin(115200);
@@ -157,6 +192,16 @@ void setup(void)
     }
   } else {
     displayMessage("No OTA. ");
+  }
+  //verify we are able to connect securely
+  // if (!verifyFingerprint()) {
+    // return;
+  // }
+
+  displayMessage("MQTT..");
+  if (!connectMQTT()) {
+    displayMessage("MQTT fail");
+    return;
   }
 }
 
