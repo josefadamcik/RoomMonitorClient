@@ -23,9 +23,9 @@ const char pressurefeed[] = AIO_USERNAME "/feeds/room-monitor.pressure";
 const char msgWifiConnecting[] PROGMEM = "WIFI connecting to: ";
 const char aioSslFingreprint[] = "77 00 54 2D DA E7 D8 03 27 31 23 99 EB 27 DB CB A5 4C 57 18";
 
-// IPAddress ip(192, 168, 178, 27);
-// IPAddress gateway(192, 168, 178, 1);
-// IPAddress subnet(255, 255, 255, 0);
+IPAddress ip(192, 168, 178, 33);
+IPAddress gateway(192, 168, 178, 1);
+IPAddress subnet(255, 255, 255, 0);
 
 U8X8_SSD1306_128X32_UNIVISION_SW_I2C display(5,4);
 
@@ -134,7 +134,7 @@ void setup(void)
 
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
-  // WiFi.config(wifiSetup.ip, wifiSetup.gateway, wifiSetup.subnet, wifiSetup.gateway, wifiSetup.gateway);
+  WiFi.config(ip, gateway, subnet, gateway, gateway);
   displayMessage("Connecting...");
   if (wifiConect()) {
     displayMessage("Wifi OK"); 
@@ -162,5 +162,5 @@ void setup(void)
 
 void loop(void)
 {
-
+  displayMessage("Looping");
 }
