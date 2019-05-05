@@ -1,0 +1,6 @@
+{
+    "terminal.integrated.env.linux": {
+        "PATH": "/home/josef/.platformio/penv/bin:/home/josef/.platformio/penv:/home/josef/.local/bin/:/home/josef/opt/google-cloud-sdk/bin:/home/josef/bin:/usr/local/bin:/home/josef/opt/flutter/bin:/home/josef/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/usr/lib/jvm/java-8-oracle/bin:/usr/lib/jvm/java-8-oracle/db/bin:/home/josef/.platformio/penv/bin",
+        "PLATFORMIO_CALLER": "vscode"
+    }
+}
