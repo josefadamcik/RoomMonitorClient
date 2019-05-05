@@ -8,7 +8,8 @@
 #include <U8x8lib.h>
 
 const char aioServer[] = "io.adafruit.com";
-const int aioServerPort = 8883; 
+const int aioServerport = 1883; 
+const int aioServerportSecure = 8883; 
 const char ssid[] = MYSSID; //put #define MYSSID "xyz" in keys.h
 const char password[] = MYPASS; //put #define MYPASS "blf" in keys.h
 const char aioUsername[] = AIO_USERNAME; //put #define AIO_USERNAME "xyz" in keys.h
@@ -23,14 +24,15 @@ const char pressurefeed[] = AIO_USERNAME "/feeds/room-monitor.pressure";
 const char msgWifiConnecting[] PROGMEM = "WIFI connecting to: ";
 const char aioSslFingreprint[] = "77 00 54 2D DA E7 D8 03 27 31 23 99 EB 27 DB CB A5 4C 57 18";
 
-IPAddress ip(192, 168, 178, 33);
-IPAddress gateway(192, 168, 178, 1);
-IPAddress subnet(255, 255, 255, 0);
+// IPAddress ip(192, 168, 178, 33);
+// IPAddress gateway(192, 168, 178, 1);
+// IPAddress subnet(255, 255, 255, 0);
 
 U8X8_SSD1306_128X32_UNIVISION_SW_I2C display(5,4);
 
+WiFiClient clientn;
 WiFiClientSecure client;
-Adafruit_MQTT_Client mqtt(&client, aioServer, aioServerPort, aioUsername, aioKey);
+Adafruit_MQTT_Client mqtt(&clientn, aioServer, aioServerport, aioUsername, aioKey);
 Adafruit_MQTT_Subscribe mqttTempFeed(&mqtt, tempfeed, MQTT_QOS_1);
 
 void displayMessage(const char* s) {
@@ -39,10 +41,14 @@ void displayMessage(const char* s) {
   display.drawString(0, 0, s);
 }
 
+// void displayUpdate(const char* s) {
+  // display.clearLine()
+// }
+
 bool verifyFingerprint() {
   displayMessage("Verifying...");
   Serial.println(aioServer);
-  if (! client.connect(aioServer, aioServerPort)) {
+  if (! client.connect(aioServer, aioServerport)) {
     Serial.println(F("Connection failed."));
     displayMessage("CON fail.");
     return false;
@@ -138,13 +144,16 @@ bool connectMQTT() {
   if (mqtt.connected()) {
     return true;
   }
+  displayMessage("MQTT...");
+  Serial.println("Connecting to MQTT");
+  Serial.print(aioServer); Serial.print(" "); Serial.println(aioServerport);
   uint8_t retries = 3;
   int8_t ret;
   while ((ret = mqtt.connect()) != 0) { // connect will return 0 for connected
       Serial.println(mqtt.connectErrorString(ret));
-      Serial.println(F("Retr MQTT connection in 0.5 second..."));
+      Serial.println(F("Retr MQTT connection in 1 second..."));
       mqtt.disconnect();
-      delay(500); 
+      delay(1000); 
       retries--;
       if (retries == 0) {
           return false; 
@@ -169,7 +178,7 @@ void setup(void)
 
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
-  WiFi.config(ip, gateway, subnet, gateway, gateway);
+  // WiFi.config(ip, gateway, subnet, gateway, gateway);
   displayMessage("Connecting...");
   if (wifiConect()) {
     displayMessage("Wifi OK"); 
@@ -197,8 +206,32 @@ void setup(void)
   // if (!verifyFingerprint()) {
     // return;
   // }
+  // if (clientn.connect(IPAddress(192, 168, 178, 29), 4000)) {
+  if (clientn.connect("192.168.178.29", 4000)) {
+    Serial.println("Local OK");
+  } else {
+    Serial.println("Local NOK");
+  }
+  clientn.stop();
 
-  displayMessage("MQTT..");
+  if (clientn.connect("josef-adamcik.cz", 443)) {
+    Serial.println("JA OK");
+  } else {
+    Serial.println("JA NOK");
+  }
+  clientn.stop();
+  if (clientn.connect(aioServer, 1883)) {
+    Serial.println("adafruit nonsecure OK");
+  } else {
+    Serial.println("adafruit nonsecure NOK");
+  }
+  clientn.stop();
+
+  if (client.connect(aioServer, aioServerport)) {
+    Serial.println("adafruit ok");
+  } else {
+    Serial.println("adafruit nok");
+  }
   if (!connectMQTT()) {
     displayMessage("MQTT fail");
     return;
@@ -207,5 +240,10 @@ void setup(void)
 
 void loop(void)
 {
-  displayMessage("Looping");
+  if (!connectMQTT()) {
+    displayMessage("MQTT fail");
+    delay(5000);
+    return;
+  }
+
 }
