@@ -34,6 +34,7 @@ WiFiClient clientn;
 WiFiClientSecure client;
 Adafruit_MQTT_Client mqtt(&clientn, aioServer, aioServerport, aioUsername, aioKey);
 Adafruit_MQTT_Subscribe mqttTempFeed(&mqtt, tempfeed, MQTT_QOS_1);
+Adafruit_MQTT_Publish mqttVccRawFeed(&mqtt, vccrawfeed, MQTT_QOS_1);
 
 void displayMessage(const char* s) {
   display.clearDisplay();
@@ -41,9 +42,30 @@ void displayMessage(const char* s) {
   display.drawString(0, 0, s);
 }
 
-// void displayUpdate(const char* s) {
-  // display.clearLine()
-// }
+void displayUpdate(const char* s) {
+  display.setFont(u8x8_font_chroma48medium8_r);
+  for (uint8_t row = 8; row < 16; row++) {
+    display.clearLine(row);
+  }
+  display.drawString(0, 1, s);
+}
+
+void displayProgress(bool reset) {
+  static uint8_t step;
+  if (reset || step == 4) {
+    step = 0;
+  }
+  if (step == 0) {
+    displayUpdate("=");
+  } else if (step == 1) {
+    displayUpdate("==");
+  } else if (step == 2) {
+    displayUpdate("===");
+  } else if (step == 3) {
+    displayUpdate("====");
+  }
+  step++;
+}
 
 bool verifyFingerprint() {
   displayMessage("Verifying...");
@@ -66,7 +88,7 @@ bool verifyFingerprint() {
 }
 
 boolean wifiConect() {
-
+    displayProgress(true);
     WiFi.begin(ssid, password);
     int retries = 0;
     int wifiStatus = WiFi.status();
@@ -79,8 +101,8 @@ boolean wifiConect() {
             delay(1);
             return false;
         }
-        if (retries % 10 == 0) {
-            Serial.print(F("."));
+        if (retries % 4 == 0) {
+            displayProgress(false);
         }
         delay(50);
         wifiStatus = WiFi.status();
@@ -92,7 +114,7 @@ boolean wifiConect() {
     return true;
 }
 void otaInitialize() {
-    ArduinoOTA.setHostname("roommonitorclient.local");
+    ArduinoOTA.setHostname("192.168.178.33");
     ArduinoOTA.onStart([]() { 
       Serial.println("OTA Start"); 
       displayMessage("OTA Start");
@@ -103,6 +125,9 @@ void otaInitialize() {
     });
     ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
         Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+        char s[5]; 
+        sprintf(s,"%d %%", (progress / (total / 100)));
+        displayUpdate(s);
     });
     ArduinoOTA.onError([](ota_error_t error) {
         Serial.printf("Error[%u]: ", error);
@@ -130,7 +155,10 @@ boolean shouldWaitForOTA() {
   pinMode(0, INPUT);
   bool waiforOTA = false;
   int keeptrying = 6;
+  char s[2];
   while (keeptrying-- > 0 && !waiforOTA) {
+      sprintf(s, "%d", keeptrying);
+      displayUpdate(s);
       if (digitalRead(0) == LOW) {
         return true;
       }
@@ -141,9 +169,21 @@ boolean shouldWaitForOTA() {
 }
 
 bool connectMQTT() {
+  int wifiStatus = WiFi.status();
+  if (wifiStatus != WL_CONNECTED){
+      Serial.println();
+      Serial.print(F("WiFi not connected, status: "));
+      Serial.print(wifiStatus);
+      Serial.println();
+      if (!wifiConect()) {
+        return false;
+      }
+  }
+
   if (mqtt.connected()) {
     return true;
   }
+
   displayMessage("MQTT...");
   Serial.println("Connecting to MQTT");
   Serial.print(aioServer); Serial.print(" "); Serial.println(aioServerport);
@@ -169,6 +209,13 @@ bool connectMQTT() {
       return false;
   }
 }
+
+void tempCallback(char *data, uint16_t len) {
+  Serial.print("Temperature updated");
+  Serial.println(data);
+  displayMessage(data);
+}
+
 
 void setup(void)
 {
@@ -227,23 +274,42 @@ void setup(void)
   }
   clientn.stop();
 
-  if (client.connect(aioServer, aioServerport)) {
-    Serial.println("adafruit ok");
-  } else {
-    Serial.println("adafruit nok");
-  }
+  // if (client.connect(aioServer, aioServerport)) {
+  //   Serial.println("adafruit ok");
+  // } else {
+  //   Serial.println("adafruit nok");
+  // }
   if (!connectMQTT()) {
     displayMessage("MQTT fail");
     return;
   }
+  displayMessage("MQTT OK");
+
+  mqttTempFeed.setCallback(tempCallback);
+  mqtt.subscribe(&mqttTempFeed);
 }
 
 void loop(void)
 {
+  Serial.println("loop");
   if (!connectMQTT()) {
     displayMessage("MQTT fail");
     delay(5000);
     return;
   }
 
+  for (uint8_t i = 0; i < 10; i++) {
+    mqtt.processPackets(200);
+    yield();
+  }
+  if (! mqttVccRawFeed.publish(199)) {
+    Serial.println(F("Publish failed"));
+  } else {
+    Serial.println(F("Publish OK!"));
+  }
+  
+  if(!mqtt.ping()) {
+    Serial.println("Ping fail, disconnect.");
+    mqtt.disconnect();
+  }
 }
