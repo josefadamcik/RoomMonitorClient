@@ -3,8 +3,6 @@
 #include <ESP8266WiFi.h>
 #include <ArduinoOTA.h>
 #include <ESP8266HTTPClient.h>
-// #include <Adafruit_MQTT.h>
-// #include <Adafruit_MQTT_Client.h>
 #include <U8x8lib.h>
 #include <AsyncMqttClient.h>
 #include <Ticker.h>
@@ -32,18 +30,12 @@ IPAddress subnet(255, 255, 255, 0);
 
 U8X8_SSD1306_128X32_UNIVISION_SW_I2C display(5,4);
 
-// WiFiClient clientn;
-// WiFiClientSecure client;
-// Adafruit_MQTT_Client mqtt(&clientn, aioServer, aioServerport, aioUsername, aioKey);
-// Adafruit_MQTT_Subscribe mqttTempFeed(&mqtt, tempfeed, MQTT_QOS_1);
-// Adafruit_MQTT_Publish mqttVccRawFeed(&mqtt, vccrawfeed, MQTT_QOS_1);
-
 AsyncMqttClient mqttClient;
 Ticker mqttReconnectTimer;
 
-WiFiEventHandler wifiConnectHandler;
-WiFiEventHandler wifiDisconnectHandler;
-Ticker wifiReconnectTimer;
+// WiFiEventHandler wifiConnectHandler;
+// WiFiEventHandler wifiDisconnectHandler;
+// Ticker wifiReconnectTimer;
 
 void displayMessage(const char* s) {
   display.clearDisplay();
@@ -53,10 +45,18 @@ void displayMessage(const char* s) {
 
 void displayUpdate(const char* s) {
   display.setFont(u8x8_font_chroma48medium8_r);
-  for (uint8_t row = 8; row < 16; row++) {
-    display.clearLine(row);
-  }
+  display.clearLine(1);
   display.drawString(0, 1, s);
+}
+
+void displayTemperature(const char* s) {
+  display.clearDisplay();
+  display.setFont(u8x8_font_courB18_2x3_f);
+  display.drawString(1,1, s);
+  Serial.println(strlen(s));
+  Serial.println(s);
+  display.drawGlyph(11,1, 'º');
+  display.drawString(13,1, "C");
 }
 
 void displayProgress(bool reset) {
@@ -75,26 +75,6 @@ void displayProgress(bool reset) {
   }
   step++;
 }
-
-// bool verifyFingerprint() {
-//   displayMessage("Verifying...");
-//   Serial.println(aioServer);
-//   if (! client.connect(aioServer, aioServerport)) {
-//     Serial.println(F("Connection failed."));
-//     displayMessage("CON fail.");
-//     return false;
-//   }
-//   if (client.verify(aioSslFingreprint, aioServer)) {
-//     Serial.println(F("Connection secure."));
-//     return true;
-//   } else {
-//     Serial.println(F("Connection insecure!"));
-//     displayMessage("CON insecure.");
-//     return false;
-//   }
-//   client.stop(); //otherwise the MQTT.connected() will return true, because the implementation
-//   //just asks the client if there is a connectioni. It actully doesn't check if there was a mqtt connection established.
-// }
 
 boolean wifiConect() {
     displayProgress(true);
@@ -241,9 +221,9 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
   subbuff[len] = '\0';
   Serial.println(" payload: ");
   Serial.println(subbuff);
-  display.clearDisplay();
-  display.drawString(0,0, topic);
-  display.drawString(0,1, subbuff);
+  if (strcmp(topic, tempfeed) == 0) {
+    displayTemperature(subbuff);
+  }
 }
 
 void onMqttPublish(uint16_t packetId) {
