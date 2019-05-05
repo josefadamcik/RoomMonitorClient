@@ -3,9 +3,11 @@
 #include <ESP8266WiFi.h>
 #include <ArduinoOTA.h>
 #include <ESP8266HTTPClient.h>
-#include <Adafruit_MQTT.h>
-#include <Adafruit_MQTT_Client.h>
+// #include <Adafruit_MQTT.h>
+// #include <Adafruit_MQTT_Client.h>
 #include <U8x8lib.h>
+#include <AsyncMqttClient.h>
+#include <Ticker.h>
 
 const char aioServer[] = "io.adafruit.com";
 const int aioServerport = 1883; 
@@ -24,17 +26,24 @@ const char pressurefeed[] = AIO_USERNAME "/feeds/room-monitor.pressure";
 const char msgWifiConnecting[] PROGMEM = "WIFI connecting to: ";
 const char aioSslFingreprint[] = "77 00 54 2D DA E7 D8 03 27 31 23 99 EB 27 DB CB A5 4C 57 18";
 
-// IPAddress ip(192, 168, 178, 33);
-// IPAddress gateway(192, 168, 178, 1);
-// IPAddress subnet(255, 255, 255, 0);
+IPAddress ip(192, 168, 178, 33);
+IPAddress gateway(192, 168, 178, 1);
+IPAddress subnet(255, 255, 255, 0);
 
 U8X8_SSD1306_128X32_UNIVISION_SW_I2C display(5,4);
 
-WiFiClient clientn;
-WiFiClientSecure client;
-Adafruit_MQTT_Client mqtt(&clientn, aioServer, aioServerport, aioUsername, aioKey);
-Adafruit_MQTT_Subscribe mqttTempFeed(&mqtt, tempfeed, MQTT_QOS_1);
-Adafruit_MQTT_Publish mqttVccRawFeed(&mqtt, vccrawfeed, MQTT_QOS_1);
+// WiFiClient clientn;
+// WiFiClientSecure client;
+// Adafruit_MQTT_Client mqtt(&clientn, aioServer, aioServerport, aioUsername, aioKey);
+// Adafruit_MQTT_Subscribe mqttTempFeed(&mqtt, tempfeed, MQTT_QOS_1);
+// Adafruit_MQTT_Publish mqttVccRawFeed(&mqtt, vccrawfeed, MQTT_QOS_1);
+
+AsyncMqttClient mqttClient;
+Ticker mqttReconnectTimer;
+
+WiFiEventHandler wifiConnectHandler;
+WiFiEventHandler wifiDisconnectHandler;
+Ticker wifiReconnectTimer;
 
 void displayMessage(const char* s) {
   display.clearDisplay();
@@ -67,25 +76,25 @@ void displayProgress(bool reset) {
   step++;
 }
 
-bool verifyFingerprint() {
-  displayMessage("Verifying...");
-  Serial.println(aioServer);
-  if (! client.connect(aioServer, aioServerport)) {
-    Serial.println(F("Connection failed."));
-    displayMessage("CON fail.");
-    return false;
-  }
-  if (client.verify(aioSslFingreprint, aioServer)) {
-    Serial.println(F("Connection secure."));
-    return true;
-  } else {
-    Serial.println(F("Connection insecure!"));
-    displayMessage("CON insecure.");
-    return false;
-  }
-  client.stop(); //otherwise the MQTT.connected() will return true, because the implementation
-  //just asks the client if there is a connectioni. It actully doesn't check if there was a mqtt connection established.
-}
+// bool verifyFingerprint() {
+//   displayMessage("Verifying...");
+//   Serial.println(aioServer);
+//   if (! client.connect(aioServer, aioServerport)) {
+//     Serial.println(F("Connection failed."));
+//     displayMessage("CON fail.");
+//     return false;
+//   }
+//   if (client.verify(aioSslFingreprint, aioServer)) {
+//     Serial.println(F("Connection secure."));
+//     return true;
+//   } else {
+//     Serial.println(F("Connection insecure!"));
+//     displayMessage("CON insecure.");
+//     return false;
+//   }
+//   client.stop(); //otherwise the MQTT.connected() will return true, because the implementation
+//   //just asks the client if there is a connectioni. It actully doesn't check if there was a mqtt connection established.
+// }
 
 boolean wifiConect() {
     displayProgress(true);
@@ -169,53 +178,79 @@ boolean shouldWaitForOTA() {
 }
 
 bool connectMQTT() {
-  int wifiStatus = WiFi.status();
-  if (wifiStatus != WL_CONNECTED){
-      Serial.println();
-      Serial.print(F("WiFi not connected, status: "));
-      Serial.print(wifiStatus);
-      Serial.println();
-      if (!wifiConect()) {
-        return false;
-      }
-  }
-
-  if (mqtt.connected()) {
-    return true;
-  }
-
   displayMessage("MQTT...");
   Serial.println("Connecting to MQTT");
-  Serial.print(aioServer); Serial.print(" "); Serial.println(aioServerport);
-  uint8_t retries = 3;
-  int8_t ret;
-  while ((ret = mqtt.connect()) != 0) { // connect will return 0 for connected
-      Serial.println(mqtt.connectErrorString(ret));
-      Serial.println(F("Retr MQTT connection in 1 second..."));
-      mqtt.disconnect();
-      delay(1000); 
-      retries--;
-      if (retries == 0) {
-          return false; 
-      }
-  }
+  mqttClient.connect();
+}
 
-  if (mqtt.connected()) {
-      Serial.println(F(" MQTT Connected!"));
-      return true;
-  } else {
-      Serial.print(F(" MQTT still NOT onnected! "));
-      Serial.println(ret);
-      return false;
+void onMqttConnect(bool sessionPresent) {
+  displayMessage("MQTT OK");
+  Serial.println("Connected to MQTT.");
+  Serial.print("Session present: ");
+  Serial.println(sessionPresent);
+  uint16_t packetIdSub = mqttClient.subscribe(tempfeed, 1);
+  Serial.print("Subscribing at QoS 1, packetId: ");
+  Serial.println(packetIdSub);
+  uint16_t packetIdPub1 = mqttClient.publish(vccrawfeed, 1, true, "898");
+  Serial.print("Publishing at QoS 1, packetId: ");
+  Serial.println(packetIdPub1);
+}
+
+void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
+  Serial.println("Disconnected from MQTT.");
+   displayMessage("MQTT OFF");
+
+  if (WiFi.isConnected()) {
+    mqttReconnectTimer.once(2, connectMQTT);
   }
 }
 
-void tempCallback(char *data, uint16_t len) {
-  Serial.print("Temperature updated");
-  Serial.println(data);
-  displayMessage(data);
+void onMqttSubscribe(uint16_t packetId, uint8_t qos) {
+  Serial.println("Subscribe acknowledged.");
+  Serial.print("  packetId: ");
+  Serial.println(packetId);
+  Serial.print("  qos: ");
+  Serial.println(qos);
 }
 
+void onMqttUnsubscribe(uint16_t packetId) {
+  Serial.println("Unsubscribe acknowledged.");
+  Serial.print("  packetId: ");
+  Serial.println(packetId);
+}
+
+void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
+  Serial.println("Publish received.");
+  Serial.print("  topic: ");
+  Serial.println(topic);
+  Serial.print("  qos: ");
+  Serial.println(properties.qos);
+  Serial.print("  dup: ");
+  Serial.println(properties.dup);
+  Serial.print("  retain: ");
+  Serial.println(properties.retain);
+  Serial.print("  len: ");
+  Serial.println(len);
+  Serial.print("  index: ");
+  Serial.println(index);
+  Serial.print("  total: ");
+  Serial.println(total);
+
+  char subbuff[len+1];
+  strncpy(subbuff, payload, len);
+  subbuff[len] = '\0';
+  Serial.println(" payload: ");
+  Serial.println(subbuff);
+  display.clearDisplay();
+  display.drawString(0,0, topic);
+  display.drawString(0,1, subbuff);
+}
+
+void onMqttPublish(uint16_t packetId) {
+  Serial.println("Publish acknowledged.");
+  Serial.print("  packetId: ");
+  Serial.println(packetId);
+}
 
 void setup(void)
 {
@@ -254,62 +289,43 @@ void setup(void)
     // return;
   // }
   // if (clientn.connect(IPAddress(192, 168, 178, 29), 4000)) {
-  if (clientn.connect("192.168.178.29", 4000)) {
-    Serial.println("Local OK");
-  } else {
-    Serial.println("Local NOK");
-  }
-  clientn.stop();
+  // if (clientn.connect("192.168.178.29", 4000)) {
+  //   Serial.println("Local OK");
+  // } else {
+  //   Serial.println("Local NOK");
+  // }
+  // clientn.stop();
 
-  if (clientn.connect("josef-adamcik.cz", 443)) {
-    Serial.println("JA OK");
-  } else {
-    Serial.println("JA NOK");
-  }
-  clientn.stop();
-  if (clientn.connect(aioServer, 1883)) {
-    Serial.println("adafruit nonsecure OK");
-  } else {
-    Serial.println("adafruit nonsecure NOK");
-  }
-  clientn.stop();
+  // if (clientn.connect("josef-adamcik.cz", 443)) {
+  //   Serial.println("JA OK");
+  // } else {
+  //   Serial.println("JA NOK");
+  // }
+  // clientn.stop();
+  // if (clientn.connect(aioServer, 1883)) {
+  //   Serial.println("adafruit nonsecure OK");
+  // } else {
+  //   Serial.println("adafruit nonsecure NOK");
+  // }
+  // clientn.stop();
 
   // if (client.connect(aioServer, aioServerport)) {
   //   Serial.println("adafruit ok");
   // } else {
   //   Serial.println("adafruit nok");
   // }
-  if (!connectMQTT()) {
-    displayMessage("MQTT fail");
-    return;
-  }
-  displayMessage("MQTT OK");
-
-  mqttTempFeed.setCallback(tempCallback);
-  mqtt.subscribe(&mqttTempFeed);
+  mqttClient.onConnect(onMqttConnect);
+  mqttClient.onDisconnect(onMqttDisconnect);
+  mqttClient.onSubscribe(onMqttSubscribe);
+  mqttClient.onUnsubscribe(onMqttUnsubscribe);
+  mqttClient.onMessage(onMqttMessage);
+  mqttClient.onPublish(onMqttPublish);
+  mqttClient.setServer(aioServer, aioServerport);
+  mqttClient.setCredentials(aioUsername, aioKey);
+  connectMQTT();
 }
 
 void loop(void)
 {
-  Serial.println("loop");
-  if (!connectMQTT()) {
-    displayMessage("MQTT fail");
-    delay(5000);
-    return;
-  }
-
-  for (uint8_t i = 0; i < 10; i++) {
-    mqtt.processPackets(200);
-    yield();
-  }
-  if (! mqttVccRawFeed.publish(199)) {
-    Serial.println(F("Publish failed"));
-  } else {
-    Serial.println(F("Publish OK!"));
-  }
   
-  if(!mqtt.ping()) {
-    Serial.println("Ping fail, disconnect.");
-    mqtt.disconnect();
-  }
 }
