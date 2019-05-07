@@ -17,11 +17,8 @@ const char aioKey[] = AIO_KEY; //put #define AIO_KEY "xyz" in keys.h
 const char tempfeed[] = AIO_USERNAME "/feeds/room-monitor.temperature";
 const char humfeed[] = AIO_USERNAME "/feeds/room-monitor.humidity";
 const char vccfeed[] = AIO_USERNAME "/feeds/room-monitor.vcc";
-const char vccrawfeed[] = AIO_USERNAME "/feeds/room-monitor.vcc-raw";
-const char vccwarning[] = AIO_USERNAME "/feeds/room-monitor.vcc-warning";
 const char photovfeed[] = AIO_USERNAME "/feeds/room-monitor.light";
 const char pressurefeed[] = AIO_USERNAME "/feeds/room-monitor.pressure";
-const char msgWifiConnecting[] PROGMEM = "WIFI connecting to: ";
 const char aioSslFingreprint[] = "77 00 54 2D DA E7 D8 03 27 31 23 99 EB 27 DB CB A5 4C 57 18";
 
 IPAddress ip(192, 168, 178, 33);
@@ -32,6 +29,20 @@ U8X8_SSD1306_128X32_UNIVISION_SW_I2C display(5,4);
 
 AsyncMqttClient mqttClient;
 Ticker mqttReconnectTimer;
+
+const uint8_t ledPin = 13;
+bool mqttStarted = false;
+bool mqttConnected = false;
+
+struct MqttData {
+  double temperature;
+  double vcc;
+  double humidity;
+  double light;
+  double pressure;
+  unsigned long lastUpdate;
+} mqttData;
+
 
 // WiFiEventHandler wifiConnectHandler;
 // WiFiEventHandler wifiDisconnectHandler;
@@ -53,10 +64,14 @@ void displayTemperature(const char* s) {
   display.clearDisplay();
   display.setFont(u8x8_font_courB18_2x3_f);
   display.drawString(1,1, s);
-  Serial.println(strlen(s));
-  Serial.println(s);
-  display.drawGlyph(11,1, 'º');
+  display.drawGlyph(11,1, '°');
   display.drawString(13,1, "C");
+}
+
+void displayOnTopRow(const char* s) {
+   display.clearLine(0);
+   display.setFont(u8x8_font_chroma48medium8_r);
+   display.drawString(0, 0, s);
 }
 
 void displayProgress(bool reset) {
@@ -160,29 +175,32 @@ boolean shouldWaitForOTA() {
 bool connectMQTT() {
   displayMessage("MQTT...");
   Serial.println("Connecting to MQTT");
+  mqttStarted = true;
   mqttClient.connect();
 }
 
 void onMqttConnect(bool sessionPresent) {
+  mqttConnected = true;
   displayMessage("MQTT OK");
-  Serial.println("Connected to MQTT.");
-  Serial.print("Session present: ");
-  Serial.println(sessionPresent);
+
+  Serial.println("Connected to MQTT."); Serial.print("Session present: "); Serial.println(sessionPresent);
+
   uint16_t packetIdSub = mqttClient.subscribe(tempfeed, 1);
-  Serial.print("Subscribing at QoS 1, packetId: ");
   Serial.println(packetIdSub);
-  uint16_t packetIdPub1 = mqttClient.publish(vccrawfeed, 1, true, "898");
-  Serial.print("Publishing at QoS 1, packetId: ");
-  Serial.println(packetIdPub1);
+  packetIdSub = mqttClient.subscribe(vccfeed, 1);
+  Serial.println(packetIdSub);
+  packetIdSub = mqttClient.subscribe(humfeed, 1);
+  Serial.println(packetIdSub);
+  packetIdSub = mqttClient.subscribe(photovfeed, 1);
+  Serial.println(packetIdSub);
+  packetIdSub = mqttClient.subscribe(pressurefeed, 1);
+  Serial.println(packetIdSub);
 }
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
   Serial.println("Disconnected from MQTT.");
-   displayMessage("MQTT OFF");
-
-  if (WiFi.isConnected()) {
-    mqttReconnectTimer.once(2, connectMQTT);
-  }
+  displayMessage("MQTT OFF");
+  mqttConnected = false;
 }
 
 void onMqttSubscribe(uint16_t packetId, uint8_t qos) {
@@ -199,30 +217,62 @@ void onMqttUnsubscribe(uint16_t packetId) {
   Serial.println(packetId);
 }
 
-void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
+void printMessageDebugInfo(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
   Serial.println("Publish received.");
-  Serial.print("  topic: ");
-  Serial.println(topic);
-  Serial.print("  qos: ");
-  Serial.println(properties.qos);
-  Serial.print("  dup: ");
-  Serial.println(properties.dup);
-  Serial.print("  retain: ");
-  Serial.println(properties.retain);
-  Serial.print("  len: ");
-  Serial.println(len);
-  Serial.print("  index: ");
-  Serial.println(index);
-  Serial.print("  total: ");
-  Serial.println(total);
+  Serial.print("  topic: "); Serial.println(topic);
+  Serial.print("  qos: "); Serial.println(properties.qos);
+  Serial.print("  dup: "); Serial.println(properties.dup);
+  Serial.print("  retain: "); Serial.println(properties.retain);
+  Serial.print("  len: "); Serial.println(len);
+  Serial.print("  index: "); Serial.println(index);
+  Serial.print("  total: ");  Serial.println(total);
+  Serial.print(" payload: "); Serial.println(payload);
+}
 
-  char subbuff[len+1];
-  strncpy(subbuff, payload, len);
-  subbuff[len] = '\0';
-  Serial.println(" payload: ");
-  Serial.println(subbuff);
+void processNewTemperatureValue(char* temperatureStr) {
+    displayTemperature(temperatureStr);
+    mqttData.temperature = atof(temperatureStr);
+    mqttData.lastUpdate = millis(); 
+}
+
+void processNewVccValue(char* str) {
+    mqttData.vcc = atof(str);
+    mqttData.lastUpdate = millis(); 
+}
+
+void processNewHumidityValue(char* str) {
+    mqttData.humidity = atof(str);
+    mqttData.lastUpdate = millis(); 
+}
+
+void processNewPressureValue(char* str) {
+    mqttData.pressure = atof(str);
+    mqttData.lastUpdate = millis(); 
+}
+
+void processNewLightValue(char* str) {
+    mqttData.light = atof(str);
+    mqttData.lastUpdate = millis(); 
+}
+
+void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
+  //fix the payload string
+  char payloadStr[len+1];
+  strncpy(payloadStr, payload, len);
+  payloadStr[len] = '\0';
+
+  printMessageDebugInfo(topic, payloadStr, properties, len, index, total);
+  
   if (strcmp(topic, tempfeed) == 0) {
-    displayTemperature(subbuff);
+      processNewTemperatureValue(payloadStr);
+  } else if (strcmp(topic, humfeed) == 0) {
+      processNewHumidityValue(payloadStr);
+  } else if (strcmp(topic, vccfeed) == 0) {
+      processNewVccValue(payloadStr);
+  } else if (strcmp(topic, photovfeed) == 0) {
+      processNewLightValue(payloadStr);
+  } else if (strcmp(topic, pressurefeed) == 0) {
+      processNewPressureValue(payloadStr);
   }
 }
 
@@ -237,6 +287,8 @@ void setup(void)
   Serial.begin(115200);
   display.begin();
   display.setPowerSave(0);
+  pinMode(ledPin, OUTPUT);
+  digitalWrite(ledPin, LOW);
 
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
@@ -264,36 +316,8 @@ void setup(void)
   } else {
     displayMessage("No OTA. ");
   }
-  //verify we are able to connect securely
-  // if (!verifyFingerprint()) {
-    // return;
-  // }
-  // if (clientn.connect(IPAddress(192, 168, 178, 29), 4000)) {
-  // if (clientn.connect("192.168.178.29", 4000)) {
-  //   Serial.println("Local OK");
-  // } else {
-  //   Serial.println("Local NOK");
-  // }
-  // clientn.stop();
 
-  // if (clientn.connect("josef-adamcik.cz", 443)) {
-  //   Serial.println("JA OK");
-  // } else {
-  //   Serial.println("JA NOK");
-  // }
-  // clientn.stop();
-  // if (clientn.connect(aioServer, 1883)) {
-  //   Serial.println("adafruit nonsecure OK");
-  // } else {
-  //   Serial.println("adafruit nonsecure NOK");
-  // }
-  // clientn.stop();
-
-  // if (client.connect(aioServer, aioServerport)) {
-  //   Serial.println("adafruit ok");
-  // } else {
-  //   Serial.println("adafruit nok");
-  // }
+  //start the mqtt
   mqttClient.onConnect(onMqttConnect);
   mqttClient.onDisconnect(onMqttDisconnect);
   mqttClient.onSubscribe(onMqttSubscribe);
@@ -305,7 +329,32 @@ void setup(void)
   connectMQTT();
 }
 
+unsigned long lastBottomLineRefresh = 0;
+const unsigned long refreshBottomLineEach = 1000;
+
 void loop(void)
 {
-  
+  if (mqttStarted) {
+    //FIXME: handle this properly, has an aenum for the state idle, connectind, disconnected or whatever
+    // if (!WiFi.isConnected()) {
+    //   digitalWrite(ledPin, HIGH);
+    //   wifiConect();
+    // } else if (!mqttConnected) {
+    //   digitalWrite(ledPin, HIGH);
+    //   mqttReconnectTimer.once(2, connectMQTT);
+    // }
+
+    if (mqttData.lastUpdate > 0) {
+      unsigned long now = millis();
+      if (lastBottomLineRefresh + refreshBottomLineEach < now) {
+        //TODO: cycle information on the bottom display row
+        char str[6]; 
+        /* 4 is mininum width, 2 is precision; float value is copied onto str_temp*/
+        Serial.println(str);
+        dtostrf(mqttData.vcc, 4, 2, str);
+        displayOnTopRow(str);
+        lastBottomLineRefresh = now;
+      }
+    }
+  }
 }
