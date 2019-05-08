@@ -43,6 +43,7 @@ int analogTouchValue = 0;
 bool monitorVoltageAlarmOn = false;
 const int analogTouchThreshold = 900;
 double monitorVoltageAlarmTreshold = 3.0; 
+bool additionalInfoActivated = false;
 int ledPulseValue = 0;
 int ledPulseStep = 128;
 
@@ -383,14 +384,28 @@ void loop(void)
       digitalWrite(ledPin, LOW);
     }
 
+    unsigned long now = millis();
+
     analogTouchValue = analogRead(A0);
     if (analogTouchValue > analogTouchThreshold) {
       Serial.println("Touch detected");
-      lastTouchDetected = millis();
+      lastTouchDetected = now;
     }
 
     if (mqttData.lastUpdate > 0) {
-      // unsigned long now = millis();
+      if (!additionalInfoActivated && lastTouchDetected + refreshTopLineEach > now) {
+        additionalInfoActivated = true;
+        char line[17]; 
+        /* 4 is mininum width, 2 is precision; float value is copied onto str_temp*/
+        char strValue[8];
+        dtostrf(mqttData.vcc, 4, 2, strValue);
+        sprintf(line, "vcc %s V", strValue);
+        displayOnTopRow(line);
+      } else if (additionalInfoActivated && lastTouchDetected + refreshTopLineEach < now) {
+        additionalInfoActivated = false;
+        display.clearLine(0);
+      }
+
       // if (lastTopLineRefresh + refreshTopLineEach < now) {
       //   //TODO: cycle information on the top display row
       //   char line[17]; 
@@ -409,5 +424,5 @@ void loop(void)
       // }
     }
   }
-  delay(100); //leave some time for networking layer to do it's stufff
+  delay(50); //leave some time for networking layer to do it's stufff
 }
