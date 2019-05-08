@@ -33,6 +33,16 @@ Ticker mqttReconnectTimer;
 const uint8_t ledPin = 13;
 bool mqttStarted = false;
 bool mqttConnected = false;
+unsigned long lastTopLineRefresh = 0;
+unsigned long lastTouchDetected = 0;
+unsigned long lastTouchChecked = 0;
+const unsigned long refreshTopLineEach = 1000;
+const unsigned long touchDetectInterval = 1000;
+char topLineBuffer[17];
+int analogTouchValue = 0;
+bool monitorVoltageAlarmOn = false;
+const int analogTouchThreshold = 900;
+double monitorVoltageAlarmTreshold = 3.0; 
 
 struct MqttData {
   double temperature;
@@ -172,7 +182,7 @@ boolean shouldWaitForOTA() {
   return false;
 }
 
-bool connectMQTT() {
+void connectMQTT() {
   displayMessage("MQTT...");
   Serial.println("Connecting to MQTT");
   mqttStarted = true;
@@ -199,6 +209,10 @@ void onMqttConnect(bool sessionPresent) {
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
   Serial.println("Disconnected from MQTT.");
+  Serial.print("Reason: ");
+  Serial.print((uint8_t)reason);
+  Serial.print(" wifi state: ");
+  Serial.println(WiFi.status());
   displayMessage("MQTT OFF");
   mqttConnected = false;
 }
@@ -238,6 +252,11 @@ void processNewTemperatureValue(char* temperatureStr) {
 void processNewVccValue(char* str) {
     mqttData.vcc = atof(str);
     mqttData.lastUpdate = millis(); 
+    if (mqttData.vcc > 0.0 && mqttData.vcc <= monitorVoltageAlarmTreshold) {
+      monitorVoltageAlarmOn = true;
+    } else {
+      monitorVoltageAlarmOn = false;
+    }
 }
 
 void processNewHumidityValue(char* str) {
@@ -327,10 +346,10 @@ void setup(void)
   mqttClient.setServer(aioServer, aioServerport);
   mqttClient.setCredentials(aioUsername, aioKey);
   connectMQTT();
+  // topLineBuffer[0] = '\0';
 }
 
-unsigned long lastBottomLineRefresh = 0;
-const unsigned long refreshBottomLineEach = 1000;
+
 
 void loop(void)
 {
@@ -344,17 +363,31 @@ void loop(void)
     //   mqttReconnectTimer.once(2, connectMQTT);
     // }
 
+    analogTouchValue = analogRead(A0);
+    if (analogTouchValue > analogTouchThreshold) {
+      Serial.println("Touch detected");
+      lastTouchDetected = millis();
+    }
+
     if (mqttData.lastUpdate > 0) {
       unsigned long now = millis();
-      if (lastBottomLineRefresh + refreshBottomLineEach < now) {
-        //TODO: cycle information on the bottom display row
-        char str[6]; 
+      if (lastTopLineRefresh + refreshTopLineEach < now) {
+        //TODO: cycle information on the top display row
+        char line[17]; 
         /* 4 is mininum width, 2 is precision; float value is copied onto str_temp*/
-        Serial.println(str);
-        dtostrf(mqttData.vcc, 4, 2, str);
-        displayOnTopRow(str);
-        lastBottomLineRefresh = now;
+        char strValue[8];
+        dtostrf(mqttData.vcc, 4, 2, strValue);
+        sprintf(line, "vcc %s V", strValue);
+
+        if (strcmp(line, topLineBuffer) != 0) {
+          Serial.println("Refresh top line, data changed");
+          Serial.println(line);
+          strcpy(topLineBuffer, line);
+          displayOnTopRow(topLineBuffer);
+        }
+        lastTopLineRefresh = now;
       }
     }
   }
+  delay(100); //leave some time for networking layer to do it's stufff
 }
