@@ -43,6 +43,8 @@ int analogTouchValue = 0;
 bool monitorVoltageAlarmOn = false;
 const int analogTouchThreshold = 900;
 double monitorVoltageAlarmTreshold = 3.0; 
+int ledPulseValue = 0;
+int ledPulseStep = 128;
 
 struct MqttData {
   double temperature;
@@ -363,6 +365,24 @@ void loop(void)
     //   mqttReconnectTimer.once(2, connectMQTT);
     // }
 
+    //pulse diode if we need to change the battery for RoomMonitor
+    if (monitorVoltageAlarmOn) {
+      ledPulseValue += ledPulseStep;
+      if (ledPulseValue >= 1023) {
+        ledPulseStep = -ledPulseStep;
+        ledPulseValue = 1023;
+      } else if (ledPulseValue <= 0) {
+        ledPulseValue = 0;
+        ledPulseStep = -ledPulseStep;
+      }
+      analogWrite(ledPin, ledPulseValue);
+    } else {
+      ledPulseValue = 0;
+      ledPulseStep = 16;
+      analogWrite(ledPin, 0);
+      digitalWrite(ledPin, LOW);
+    }
+
     analogTouchValue = analogRead(A0);
     if (analogTouchValue > analogTouchThreshold) {
       Serial.println("Touch detected");
@@ -370,23 +390,23 @@ void loop(void)
     }
 
     if (mqttData.lastUpdate > 0) {
-      unsigned long now = millis();
-      if (lastTopLineRefresh + refreshTopLineEach < now) {
-        //TODO: cycle information on the top display row
-        char line[17]; 
-        /* 4 is mininum width, 2 is precision; float value is copied onto str_temp*/
-        char strValue[8];
-        dtostrf(mqttData.vcc, 4, 2, strValue);
-        sprintf(line, "vcc %s V", strValue);
+      // unsigned long now = millis();
+      // if (lastTopLineRefresh + refreshTopLineEach < now) {
+      //   //TODO: cycle information on the top display row
+      //   char line[17]; 
+      //   /* 4 is mininum width, 2 is precision; float value is copied onto str_temp*/
+      //   char strValue[8];
+      //   dtostrf(mqttData.vcc, 4, 2, strValue);
+      //   sprintf(line, "vcc %s V", strValue);
 
-        if (strcmp(line, topLineBuffer) != 0) {
-          Serial.println("Refresh top line, data changed");
-          Serial.println(line);
-          strcpy(topLineBuffer, line);
-          displayOnTopRow(topLineBuffer);
-        }
-        lastTopLineRefresh = now;
-      }
+      //   if (strcmp(line, topLineBuffer) != 0) {
+      //     Serial.println("Refresh top line, data changed");
+      //     Serial.println(line);
+      //     strcpy(topLineBuffer, line);
+      //     displayOnTopRow(topLineBuffer);
+      //   }
+      //   lastTopLineRefresh = now;
+      // }
     }
   }
   delay(100); //leave some time for networking layer to do it's stufff
