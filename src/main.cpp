@@ -21,7 +21,7 @@ const char photovfeed[] = AIO_USERNAME "/feeds/room-monitor.light";
 const char pressurefeed[] = AIO_USERNAME "/feeds/room-monitor.pressure";
 const char aioSslFingreprint[] = "77 00 54 2D DA E7 D8 03 27 31 23 99 EB 27 DB CB A5 4C 57 18";
 
-IPAddress ip(192, 168, 178, 33);
+IPAddress ip(192, 168, 178, 34);
 IPAddress gateway(192, 168, 178, 1);
 IPAddress subnet(255, 255, 255, 0);
 
@@ -131,7 +131,7 @@ boolean wifiConect() {
     return true;
 }
 void otaInitialize() {
-    ArduinoOTA.setHostname("192.168.178.33");
+    ArduinoOTA.setHostname("192.168.178.34");
     ArduinoOTA.onStart([]() { 
       Serial.println("OTA Start"); 
       displayMessage("OTA Start");
