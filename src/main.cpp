@@ -21,6 +21,13 @@ const char photovfeed[] = AIO_USERNAME "/feeds/room-monitor.light";
 const char pressurefeed[] = AIO_USERNAME "/feeds/room-monitor.pressure";
 const char aioSslFingreprint[] = "77 00 54 2D DA E7 D8 03 27 31 23 99 EB 27 DB CB A5 4C 57 18";
 
+enum MqttConnectionState {
+  Idle,
+  Connecting,
+  Connected,
+  Disconnected
+};
+
 IPAddress ip(192, 168, 178, 34);
 IPAddress gateway(192, 168, 178, 1);
 IPAddress subnet(255, 255, 255, 0);
@@ -29,10 +36,9 @@ U8X8_SSD1306_128X32_UNIVISION_SW_I2C display(5,4);
 
 AsyncMqttClient mqttClient;
 Ticker mqttReconnectTimer;
+MqttConnectionState mqttConnectionState = Idle;
 
 const uint8_t ledPin = 13;
-bool mqttStarted = false;
-bool mqttConnected = false;
 unsigned long lastTopLineRefresh = 0;
 unsigned long lastTouchDetected = 0;
 unsigned long lastTouchChecked = 0;
@@ -130,6 +136,18 @@ boolean wifiConect() {
     Serial.println(F("Setup done"));
     return true;
 }
+
+void ensureWifiConnection() {
+  if (!WiFi.isConnected()) {
+    displayMessage("Connecting...");
+    if (wifiConect()) {
+      displayMessage("Wifi OK"); 
+    } else {
+      displayMessage("Wifi NOK");
+    }
+  }
+}
+
 void otaInitialize() {
     ArduinoOTA.setHostname("192.168.178.34");
     ArduinoOTA.onStart([]() { 
@@ -186,14 +204,14 @@ boolean shouldWaitForOTA() {
 }
 
 void connectMQTT() {
+  mqttConnectionState = Connecting;
   displayMessage("MQTT...");
   Serial.println("Connecting to MQTT");
-  mqttStarted = true;
   mqttClient.connect();
 }
 
 void onMqttConnect(bool sessionPresent) {
-  mqttConnected = true;
+  mqttConnectionState = Connected;
   displayMessage("MQTT OK");
 
   Serial.println("Connected to MQTT."); Serial.print("Session present: "); Serial.println(sessionPresent);
@@ -211,13 +229,13 @@ void onMqttConnect(bool sessionPresent) {
 }
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
+  mqttConnectionState = Disconnected;
   Serial.println("Disconnected from MQTT.");
   Serial.print("Reason: ");
   Serial.print((uint8_t)reason);
   Serial.print(" wifi state: ");
   Serial.println(WiFi.status());
   displayMessage("MQTT OFF");
-  mqttConnected = false;
 }
 
 void onMqttSubscribe(uint16_t packetId, uint8_t qos) {
@@ -315,13 +333,7 @@ void setup(void)
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
   // WiFi.config(ip, gateway, subnet, gateway, gateway);
-  displayMessage("Connecting...");
-  if (wifiConect()) {
-    displayMessage("Wifi OK"); 
-  } else {
-    displayMessage("Wifi NOK");
-    while(true) {};
-  }
+  ensureWifiConnection();
 
   //Give some time to the user to press the programming button in order to indicate we will be doing OTA update.
   displayMessage("OTA?");
@@ -356,16 +368,22 @@ void setup(void)
 
 void loop(void)
 {
-  if (mqttStarted) {
-    //FIXME: handle this properly, has an aenum for the state idle, connectind, disconnected or whatever
-    // if (!WiFi.isConnected()) {
-    //   digitalWrite(ledPin, HIGH);
-    //   wifiConect();
-    // } else if (!mqttConnected) {
-    //   digitalWrite(ledPin, HIGH);
-    //   mqttReconnectTimer.once(2, connectMQTT);
-    // }
+  if (mqttConnectionState == Disconnected || mqttConnectionState == Idle){
+    digitalWrite(ledPin, HIGH);
 
+    if (!WiFi.isConnected()) {
+      WiFi.mode(WIFI_OFF);
+      delay(10);
+      WiFi.mode(WIFI_STA);
+      delay(10);
+      ensureWifiConnection();
+      delay(100);
+    } 
+    
+    if (WiFi.isConnected()) {
+      mqttReconnectTimer.once(2, connectMQTT);
+    }
+  } else if (mqttConnectionState == Connected) {
     //pulse diode if we need to change the battery for RoomMonitor
     if (monitorVoltageAlarmOn) {
       ledPulseValue += ledPulseStep;
@@ -405,24 +423,8 @@ void loop(void)
         additionalInfoActivated = false;
         display.clearLine(0);
       }
-
-      // if (lastTopLineRefresh + refreshTopLineEach < now) {
-      //   //TODO: cycle information on the top display row
-      //   char line[17]; 
-      //   /* 4 is mininum width, 2 is precision; float value is copied onto str_temp*/
-      //   char strValue[8];
-      //   dtostrf(mqttData.vcc, 4, 2, strValue);
-      //   sprintf(line, "vcc %s V", strValue);
-
-      //   if (strcmp(line, topLineBuffer) != 0) {
-      //     Serial.println("Refresh top line, data changed");
-      //     Serial.println(line);
-      //     strcpy(topLineBuffer, line);
-      //     displayOnTopRow(topLineBuffer);
-      //   }
-      //   lastTopLineRefresh = now;
-      // }
     }
   }
+
   delay(50); //leave some time for networking layer to do it's stufff
 }
