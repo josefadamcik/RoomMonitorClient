@@ -372,6 +372,7 @@ void loop(void)
     digitalWrite(ledPin, HIGH);
 
     if (!WiFi.isConnected()) {
+      displayMessage("WIFI OFF");
       WiFi.mode(WIFI_OFF);
       delay(10);
       WiFi.mode(WIFI_STA);
@@ -381,7 +382,10 @@ void loop(void)
     } 
     
     if (WiFi.isConnected()) {
-      mqttReconnectTimer.once(2, connectMQTT);
+      displayMessage("MQTT retry");
+      delay(100);
+      connectMQTT();
+      delay(100);
     }
   } else if (mqttConnectionState == Connected) {
     //pulse diode if we need to change the battery for RoomMonitor
