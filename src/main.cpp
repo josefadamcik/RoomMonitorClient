@@ -7,19 +7,16 @@
 #include <AsyncMqttClient.h>
 #include <Ticker.h>
 
-const char aioServer[] = "io.adafruit.com";
+#define ROOM_NAME "bedroom"
+
+const char aioServer[] = "192.168.178.31";
 const int aioServerport = 1883; 
-const int aioServerportSecure = 8883; 
 const char ssid[] = MYSSID; //put #define MYSSID "xyz" in keys.h
 const char password[] = MYPASS; //put #define MYPASS "blf" in keys.h
-const char aioUsername[] = AIO_USERNAME; //put #define AIO_USERNAME "xyz" in keys.h
-const char aioKey[] = AIO_KEY; //put #define AIO_KEY "xyz" in keys.h
-const char tempfeed[] = AIO_USERNAME "/feeds/room-monitor.temperature";
-const char humfeed[] = AIO_USERNAME "/feeds/room-monitor.humidity";
-const char vccfeed[] = AIO_USERNAME "/feeds/room-monitor.vcc";
-const char photovfeed[] = AIO_USERNAME "/feeds/room-monitor.light";
-const char pressurefeed[] = AIO_USERNAME "/feeds/room-monitor.pressure";
-const char aioSslFingreprint[] = "77 00 54 2D DA E7 D8 03 27 31 23 99 EB 27 DB CB A5 4C 57 18";
+const char tempfeed[] = "home/" ROOM_NAME "/temperature";
+const char humfeed[] = "home/" ROOM_NAME "/humidity";
+const char vccfeed[] = "home/" ROOM_NAME "/vcc";
+const char photovfeed[] = "home/" ROOM_NAME "/light";
 
 enum MqttConnectionState {
   Idle,
@@ -58,7 +55,6 @@ struct MqttData {
   double vcc;
   double humidity;
   double light;
-  double pressure;
   unsigned long lastUpdate;
 } mqttData;
 
@@ -224,8 +220,6 @@ void onMqttConnect(bool sessionPresent) {
   Serial.println(packetIdSub);
   packetIdSub = mqttClient.subscribe(photovfeed, 1);
   Serial.println(packetIdSub);
-  packetIdSub = mqttClient.subscribe(pressurefeed, 1);
-  Serial.println(packetIdSub);
 }
 
 void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
@@ -285,11 +279,6 @@ void processNewHumidityValue(char* str) {
     mqttData.lastUpdate = millis(); 
 }
 
-void processNewPressureValue(char* str) {
-    mqttData.pressure = atof(str);
-    mqttData.lastUpdate = millis(); 
-}
-
 void processNewLightValue(char* str) {
     mqttData.light = atof(str);
     mqttData.lastUpdate = millis(); 
@@ -311,9 +300,7 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
       processNewVccValue(payloadStr);
   } else if (strcmp(topic, photovfeed) == 0) {
       processNewLightValue(payloadStr);
-  } else if (strcmp(topic, pressurefeed) == 0) {
-      processNewPressureValue(payloadStr);
-  }
+  } 
 }
 
 void onMqttPublish(uint16_t packetId) {
@@ -359,7 +346,6 @@ void setup(void)
   mqttClient.onMessage(onMqttMessage);
   mqttClient.onPublish(onMqttPublish);
   mqttClient.setServer(aioServer, aioServerport);
-  mqttClient.setCredentials(aioUsername, aioKey);
   connectMQTT();
   // topLineBuffer[0] = '\0';
 }
