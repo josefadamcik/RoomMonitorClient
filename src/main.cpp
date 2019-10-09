@@ -35,15 +35,14 @@ PubSubClient mqttClient(wifiClient);
 const uint8_t ledPin = 13;
 unsigned long lastTopLineRefresh = 0;
 unsigned long lastTouchDetected = 0;
-unsigned long lastTouchChecked = 0;
 const unsigned long refreshTopLineEach = 1000;
-const unsigned long touchDetectInterval = 1000;
+const unsigned long touchTriggerTimeout = 250;
 char topLineBuffer[17];
 int analogTouchValue = 0;
 bool monitorVoltageAlarmOn = false;
 const int analogTouchThreshold = 900;
 double monitorVoltageAlarmTreshold = 3.0; 
-bool additionalInfoActivated = false;
+uint8_t additionalInfoActivated = 0;
 int ledPulseValue = 0;
 int ledPulseStep = 128;
 
@@ -53,7 +52,7 @@ struct MqttData {
   double humidity;
   double light;
   unsigned long lastUpdate;
-} mqttData;
+} mqttData[roomCount];
 
 // WiFiEventHandler wifiConnectHandler;
 // WiFiEventHandler wifiDisconnectHandler;
@@ -229,30 +228,32 @@ void connectMQTT() {
   }
 }
 
-void processNewTemperatureValue(char* temperatureStr) {
-    displayTemperature(temperatureStr);
-    mqttData.temperature = atof(temperatureStr);
-    mqttData.lastUpdate = millis(); 
+void processNewTemperatureValue(int index, char* temperatureStr) {
+   if (index == selectedRooomIndex) {
+      displayTemperature(temperatureStr);
+   }
+   mqttData[index].temperature = atof(temperatureStr);
+   mqttData[index].lastUpdate = millis(); 
 }
 
-void processNewVccValue(char* str) {
-    mqttData.vcc = atof(str);
-    mqttData.lastUpdate = millis(); 
-    if (mqttData.vcc > 0.0 && mqttData.vcc <= monitorVoltageAlarmTreshold) {
+void processNewVccValue(int index, char* str) {
+    mqttData[index].vcc = atof(str);
+    mqttData[index].lastUpdate = millis(); 
+    if (mqttData[index].vcc > 0.0 && mqttData[index].vcc <= monitorVoltageAlarmTreshold) {
       monitorVoltageAlarmOn = true;
     } else {
       monitorVoltageAlarmOn = false;
     }
 }
 
-void processNewHumidityValue(char* str) {
-    mqttData.humidity = atof(str);
-    mqttData.lastUpdate = millis(); 
+void processNewHumidityValue(int index, char* str) {
+    mqttData[index].humidity = atof(str);
+    mqttData[index].lastUpdate = millis(); 
 }
 
-void processNewLightValue(char* str) {
-    mqttData.light = atof(str);
-    mqttData.lastUpdate = millis(); 
+void processNewLightValue(int index, char* str) {
+    mqttData[index].light = atof(str);
+    mqttData[index].lastUpdate = millis(); 
 }
 
 void onMqttMessage(char* topic, byte* payload, unsigned int len) {
@@ -274,16 +275,16 @@ void onMqttMessage(char* topic, byte* payload, unsigned int len) {
       break;
     }
   }   
-  if (foundRoomIndex == selectedRooomIndex) {
+  if (foundRoomIndex != -1)  {
     if (strstr(topic, tempfeed) != NULL) {
-        processNewTemperatureValue(payloadStr);
+        processNewTemperatureValue(foundRoomIndex, payloadStr);
     } else if (strstr(topic, humfeed) != NULL) {
-        processNewHumidityValue(payloadStr);
+        processNewHumidityValue(foundRoomIndex, payloadStr);
     } else if (strstr(topic, vccfeed) != NULL) {
-        processNewVccValue(payloadStr);
+        processNewVccValue(foundRoomIndex, payloadStr);
     } else if (strstr(topic, photovfeed) != NULL) {
-        processNewLightValue(payloadStr);
-    }  
+        processNewLightValue(foundRoomIndex, payloadStr);
+    } 
   }
 }
 
@@ -367,22 +368,41 @@ void loop(void)
     unsigned long now = millis();
 
     analogTouchValue = analogRead(A0);
+    boolean touchTriggered = false;
     if (analogTouchValue > analogTouchThreshold) {
-      Serial.println("Touch detected");
-      lastTouchDetected = now;
+      if (lastTouchDetected + touchTriggerTimeout < now) {
+        Serial.println("Touch detected");
+        lastTouchDetected = now;
+        touchTriggered = true;
+      }
     }
 
-    if (mqttData.lastUpdate > 0) {
-      if (!additionalInfoActivated && lastTouchDetected + refreshTopLineEach > now) {
-        additionalInfoActivated = true;
+    if (mqttData[selectedRooomIndex].lastUpdate > 0) {
+      if (!additionalInfoActivated && touchTriggered) {
+        additionalInfoActivated++;
         char line[17]; 
         /* 4 is mininum width, 2 is precision; float value is copied onto str_temp*/
         char strValue[8];
-        dtostrf(mqttData.vcc, 4, 2, strValue);
+        dtostrf(mqttData[selectedRooomIndex].vcc, 4, 2, strValue);
         sprintf(line, "vcc %s V", strValue);
         displayOnTopRow(line);
-      } else if (additionalInfoActivated && lastTouchDetected + refreshTopLineEach < now) {
-        additionalInfoActivated = false;
+      } else if (additionalInfoActivated == 1 && touchTriggered) {
+        additionalInfoActivated++;
+        displayOnTopRow(rooms[selectedRooomIndex]);
+      } else if (additionalInfoActivated == 2 && touchTriggered) {
+        additionalInfoActivated = 1;
+        //swtich room
+        selectedRooomIndex++;
+        if (selectedRooomIndex >= roomCount) {
+          selectedRooomIndex = 0;
+        }
+        //display temp in anothre room
+        char strValue[5];
+        dtostrf(mqttData[selectedRooomIndex].temperature, 5,2, strValue);
+        displayTemperature(strValue);
+        displayOnTopRow(rooms[selectedRooomIndex]);
+      } else if (additionalInfoActivated > 0 && lastTouchDetected + refreshTopLineEach < now) {
+        additionalInfoActivated = 0;
         display.clearLine(0);
       }
     }
