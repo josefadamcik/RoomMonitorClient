@@ -4,26 +4,24 @@
 #include <ArduinoOTA.h>
 #include <ESP8266HTTPClient.h>
 #include <U8x8lib.h>
-#include <AsyncMqttClient.h>
 #include <Ticker.h>
+#include <PubSubClient.h>
 
-#define ROOM_NAME "bedroom"
+
+const int roomCount = 2;
+const char rooms[roomCount][11] = {"bedroom", "livingroom"};
+const char feedPrefix[] = "home/";
+int selectedRooomIndex = 0;
+
 
 const char aioServer[] = "192.168.178.31";
 const int aioServerport = 1883; 
 const char ssid[] = MYSSID; //put #define MYSSID "xyz" in keys.h
 const char password[] = MYPASS; //put #define MYPASS "blf" in keys.h
-const char tempfeed[] = "home/" ROOM_NAME "/temperature";
-const char humfeed[] = "home/" ROOM_NAME "/humidity";
-const char vccfeed[] = "home/" ROOM_NAME "/vcc";
-const char photovfeed[] = "home/" ROOM_NAME "/light";
-
-enum MqttConnectionState {
-  Idle,
-  Connecting,
-  Connected,
-  Disconnected
-};
+const char tempfeed[] = "/temperature";
+const char humfeed[] = "/humidity";
+const char vccfeed[] = "/vcc";
+const char photovfeed[] = "/light";
 
 IPAddress ip(192, 168, 178, 34);
 IPAddress gateway(192, 168, 178, 1);
@@ -31,9 +29,8 @@ IPAddress subnet(255, 255, 255, 0);
 
 U8X8_SSD1306_128X32_UNIVISION_SW_I2C display(5,4);
 
-AsyncMqttClient mqttClient;
-Ticker mqttReconnectTimer;
-MqttConnectionState mqttConnectionState = Idle;
+WiFiClient wifiClient;
+PubSubClient mqttClient(wifiClient);
 
 const uint8_t ledPin = 13;
 unsigned long lastTopLineRefresh = 0;
@@ -57,7 +54,6 @@ struct MqttData {
   double light;
   unsigned long lastUpdate;
 } mqttData;
-
 
 // WiFiEventHandler wifiConnectHandler;
 // WiFiEventHandler wifiDisconnectHandler;
@@ -199,63 +195,38 @@ boolean shouldWaitForOTA() {
   return false;
 }
 
-void connectMQTT() {
-  mqttConnectionState = Connecting;
-  displayMessage("MQTT...");
-  Serial.println("Connecting to MQTT");
-  mqttClient.connect();
-}
-
-void onMqttConnect(bool sessionPresent) {
-  mqttConnectionState = Connected;
+void subscribe() {
   displayMessage("MQTT OK");
 
-  Serial.println("Connected to MQTT."); Serial.print("Session present: "); Serial.println(sessionPresent);
-
-  uint16_t packetIdSub = mqttClient.subscribe(tempfeed, 1);
-  Serial.println(packetIdSub);
-  packetIdSub = mqttClient.subscribe(vccfeed, 1);
-  Serial.println(packetIdSub);
-  packetIdSub = mqttClient.subscribe(humfeed, 1);
-  Serial.println(packetIdSub);
-  packetIdSub = mqttClient.subscribe(photovfeed, 1);
-  Serial.println(packetIdSub);
+  Serial.println("Connected to MQTT."); 
+  for (uint8_t roomIndex = 0; roomIndex < roomCount; roomIndex++) {
+    String feedRoomPrefix = feedPrefix + String(rooms[roomIndex]);
+    Serial.print("Room: "); Serial.println(feedRoomPrefix);
+    Serial.println((feedRoomPrefix + tempfeed).c_str());
+    mqttClient.subscribe((feedRoomPrefix + tempfeed).c_str(), 1);
+    mqttClient.subscribe((feedRoomPrefix + vccfeed).c_str(), 1);
+    mqttClient.subscribe((feedRoomPrefix + humfeed).c_str(), 1);
+    mqttClient.subscribe((feedRoomPrefix + photovfeed).c_str(), 1);
+  }
 }
 
-void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
-  mqttConnectionState = Disconnected;
-  Serial.println("Disconnected from MQTT.");
-  Serial.print("Reason: ");
-  Serial.print((uint8_t)reason);
-  Serial.print(" wifi state: ");
-  Serial.println(WiFi.status());
-  displayMessage("MQTT OFF");
-}
-
-void onMqttSubscribe(uint16_t packetId, uint8_t qos) {
-  Serial.println("Subscribe acknowledged.");
-  Serial.print("  packetId: ");
-  Serial.println(packetId);
-  Serial.print("  qos: ");
-  Serial.println(qos);
-}
-
-void onMqttUnsubscribe(uint16_t packetId) {
-  Serial.println("Unsubscribe acknowledged.");
-  Serial.print("  packetId: ");
-  Serial.println(packetId);
-}
-
-void printMessageDebugInfo(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
-  Serial.println("Publish received.");
-  Serial.print("  topic: "); Serial.println(topic);
-  Serial.print("  qos: "); Serial.println(properties.qos);
-  Serial.print("  dup: "); Serial.println(properties.dup);
-  Serial.print("  retain: "); Serial.println(properties.retain);
-  Serial.print("  len: "); Serial.println(len);
-  Serial.print("  index: "); Serial.println(index);
-  Serial.print("  total: ");  Serial.println(total);
-  Serial.print(" payload: "); Serial.println(payload);
+void connectMQTT() {
+  while (!mqttClient.connected()) {
+    displayMessage("MQTT...");
+    Serial.print("Attempting MQTT connection...");
+    String clientId = "RoomMointorClient";
+    // clientId += String(random(0xffff), HEX);
+    if (mqttClient.connect(clientId.c_str())) {
+      Serial.println("connected");
+      mqttClient.publish("/home/client/ping", "hi");
+      subscribe();
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(mqttClient.state());
+      Serial.println(" try again in few seconds");
+      delay(2000);
+    }
+  }
 }
 
 void processNewTemperatureValue(char* temperatureStr) {
@@ -284,29 +255,36 @@ void processNewLightValue(char* str) {
     mqttData.lastUpdate = millis(); 
 }
 
-void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
+void onMqttMessage(char* topic, byte* payload, unsigned int len) {
   //fix the payload string
   char payloadStr[len+1];
-  strncpy(payloadStr, payload, len);
+  strncpy(payloadStr, (char *)payload, len);
   payloadStr[len] = '\0';
-
-  printMessageDebugInfo(topic, payloadStr, properties, len, index, total);
   
-  if (strcmp(topic, tempfeed) == 0) {
-      processNewTemperatureValue(payloadStr);
-  } else if (strcmp(topic, humfeed) == 0) {
-      processNewHumidityValue(payloadStr);
-  } else if (strcmp(topic, vccfeed) == 0) {
-      processNewVccValue(payloadStr);
-  } else if (strcmp(topic, photovfeed) == 0) {
-      processNewLightValue(payloadStr);
-  } 
-}
+  Serial.print("Message arrived [");
+  Serial.print(topic);
+  Serial.print("] ");
+  Serial.println(payloadStr);
+  Serial.println();
 
-void onMqttPublish(uint16_t packetId) {
-  Serial.println("Publish acknowledged.");
-  Serial.print("  packetId: ");
-  Serial.println(packetId);
+  int foundRoomIndex = -1;
+  for (int roomIndex = 0; roomIndex < roomCount; roomIndex++) {
+    if (strstr(topic, rooms[roomIndex]) != NULL) {
+      foundRoomIndex = roomIndex;
+      break;
+    }
+  }   
+  if (foundRoomIndex == selectedRooomIndex) {
+    if (strstr(topic, tempfeed) != NULL) {
+        processNewTemperatureValue(payloadStr);
+    } else if (strstr(topic, humfeed) != NULL) {
+        processNewHumidityValue(payloadStr);
+    } else if (strstr(topic, vccfeed) != NULL) {
+        processNewVccValue(payloadStr);
+    } else if (strstr(topic, photovfeed) != NULL) {
+        processNewLightValue(payloadStr);
+    }  
+  }
 }
 
 void setup(void)
@@ -339,22 +317,14 @@ void setup(void)
   }
 
   //start the mqtt
-  mqttClient.onConnect(onMqttConnect);
-  mqttClient.onDisconnect(onMqttDisconnect);
-  mqttClient.onSubscribe(onMqttSubscribe);
-  mqttClient.onUnsubscribe(onMqttUnsubscribe);
-  mqttClient.onMessage(onMqttMessage);
-  mqttClient.onPublish(onMqttPublish);
   mqttClient.setServer(aioServer, aioServerport);
+  mqttClient.setCallback(onMqttMessage);
   connectMQTT();
-  // topLineBuffer[0] = '\0';
 }
-
-
 
 void loop(void)
 {
-  if (mqttConnectionState == Disconnected || mqttConnectionState == Idle){
+  if (!mqttClient.connected()){
     digitalWrite(ledPin, HIGH);
 
     if (!WiFi.isConnected()) {
@@ -373,7 +343,9 @@ void loop(void)
       connectMQTT();
       delay(100);
     }
-  } else if (mqttConnectionState == Connected) {
+  } else if (mqttClient.connected()) {
+    mqttClient.loop();
+
     //pulse diode if we need to change the battery for RoomMonitor
     if (monitorVoltageAlarmOn) {
       ledPulseValue += ledPulseStep;
