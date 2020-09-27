@@ -14,7 +14,7 @@ const char feedPrefix[] = "home/";
 int selectedRooomIndex = 0;
 
 
-const char aioServer[] = "192.168.178.31";
+const char aioServer[] = "192.168.178.58";
 const int aioServerport = 1883; 
 const char ssid[] = MYSSID; //put #define MYSSID "xyz" in keys.h
 const char password[] = MYPASS; //put #define MYPASS "blf" in keys.h
