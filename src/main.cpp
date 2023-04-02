@@ -9,13 +9,15 @@
 
 
 const int roomCount = 2;
-const char rooms[roomCount][11] = {"bedroom", "livingroom"};
+const char rooms[roomCount][11] = {"workroom", "livingroom"};
 const char feedPrefix[] = "home/";
 int selectedRooomIndex = 0;
 
 
-const char aioServer[] = "192.168.178.58";
+const char aioServer[] = "192.168.178.76";
 const int aioServerport = 1883; 
+const char mqttLogin[] = "mqtt";
+const char mqttPass[] = MQTTPASS;
 const char ssid[] = MYSSID; //put #define MYSSID "xyz" in keys.h
 const char password[] = MYPASS; //put #define MYPASS "blf" in keys.h
 const char tempfeed[] = "/temperature";
@@ -140,7 +142,7 @@ void ensureWifiConnection() {
 }
 
 void otaInitialize() {
-    ArduinoOTA.setHostname("192.168.178.34");
+    ArduinoOTA.setHostname("192.168.178.36");
     ArduinoOTA.onStart([]() { 
       Serial.println("OTA Start"); 
       displayMessage("OTA Start");
@@ -215,7 +217,7 @@ void connectMQTT() {
     Serial.print("Attempting MQTT connection...");
     String clientId = "RoomMointorClient";
     // clientId += String(random(0xffff), HEX);
-    if (mqttClient.connect(clientId.c_str())) {
+    if (mqttClient.connect(clientId.c_str(), mqttLogin, mqttPass)) {
       Serial.println("connected");
       mqttClient.publish("/home/client/ping", "hi");
       subscribe();
